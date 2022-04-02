@@ -1,0 +1,577 @@
+---
+title: "DS1 - ML Concepts Problem Set 1"
+author: "Son N. Nguyen"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  rmarkdown::html_document:
+    theme: lumen
+    toc: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = T, message = F, warning = F, fig.align="center", fig.width = 8, fig.height = 5)
+
+```
+
+```{r message=FALSE}
+
+library(tidyverse)
+library(ggpubr)
+library(kableExtra)
+theme_set(theme_minimal())
+
+```
+
+## Problem 1.
+
+### a.) Write a function that implements the local averaging estimator for a given sample, bandwidth h and evaluation point x.
+
+
+```{r}
+
+local_avg <- function(X, Y, h, x){
+  #init empty vectors
+  numer = c()
+  denom = c()
+  
+  #convert matrix to df so we can cross-looping
+  X = as.data.frame(X)
+  
+  #loop through every rows
+  for (j in 1:length(Y)){
+    bools <- c()
+    #check bandwidth condition for every X variable
+    for (i in 1:length(names(X))){
+      bool <- I(norm(X[[i]][j]-x, type = "2")<=(h/2))
+      bools <- append(bools, bool)
+    }
+    # evaluate binary at a row level (True if all variables fall within the badwidth)
+    numeri <- Y[j]*all(bools)
+    denomi <- all(bools)
+    #append to list
+    numer <- append(numer, numeri)
+    denom <- append(denom, denomi)
+  }
+  
+  #summarize from i to n
+  fx <- sum(numer)/sum(denom)
+  return(fx)
+}
+
+```
+
+### b.) Generate a sample of $n = 300$ observations from the model
+
+```{r}
+
+f_y_x <- function(x) {
+    x^3 - 3.5 * x^2 + 3*x
+}
+
+n <- 300
+set.seed(1234)
+
+# generate random sample from uniform distribution
+x = matrix(runif(n, 0, 2), nrow = n, ncol = 1)
+
+# apply model to calculate expected and true fx
+y_exp <- f_y_x(x)
+# generate error term
+e <- rnorm(length(y_exp), mean = 0, sd = 1)
+# approximate model
+y <- y_exp + e
+simdf <- data.frame(x,y,e)
+
+kable(x = head(simdf), digits = 3, caption = 'Head of Sample') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+### c.) Estimate $f(x) = E(Y | X = x)$ at $x = 1$ and $x = 0.1$ for a fine grid of bandwidth values over [0.05,2].
+
+```{r}
+
+#generate uniform distribution
+generate_predictors <- function(n, p) {
+    x <- matrix(runif(n*p, min = 0, max = 2), nrow = n, ncol = p)
+}
+
+n = 300
+p = 1
+
+# Define values for x0 and h
+x0s = c( 1, 0.1 )
+hs = seq( 0.05, 2, by = 0.05 )
+
+```
+
+```{r}
+
+run_simulation <- function(x_generator,x0 = x0s, h = hs ) {
+    
+    #generate X
+    x <- x_generator(n,p)	
+    # calculate expected y from given model
+    y_exp <- f_y_x(x)
+    e <- rnorm(length(y_exp), mean = 0, sd = 1)
+    y <- y_exp + e
+    
+    # create map of all combinations between x0 and h
+    variables <- list(h = h, x0 = x0s)
+    h_x0 <- expand.grid(variables)
+    
+    map2_df(.x = h_x0$h, .y = h_x0$x0,  ~{
+    loc_avg <- local_avg(x, y, .x, .y)
+    t <- tibble(
+            h = .x, 
+            x0 = .y, 
+            f = f_y_x(x0), #evaluate performance
+            f_star = as.numeric(loc_avg),
+            error = as.numeric(f) - f_star
+        )        
+    return(t)} )
+    
+}
+
+```
+
+```{r}
+
+set.seed(1234)
+
+df <- run_simulation(generate_predictors)
+
+kable(x = head(df), digits = 3, caption = 'Head of LAE w/ sample of 300 and k = 1') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+### d.) Repeat steps b) and c) many times, say, 1000. Then you’ll have 1000 estimates fh(x) for each value of h and x. Compute $\text{Bias}[f_{h}(x)]^2, \; \text{Var}[f_{h}(x)] \; and \; \text{MSE}[f_{h}(x)] = \text{Bias}[f_{h}(x)]^2+ \text{Var}[f_{h}(x)]$ for each h and x = 0.1, 1. Plot these quantities as a function of h.
+
+
+```{r, eval=F}
+
+set.seed(1234)
+# Run simulation for nsim times
+nsim <- 1000
+simulation_results <- map_df(
+    seq(nsim),
+    run_simulation,
+    x_generator = generate_predictors
+)
+
+write.csv(simulation_results, "sim1d", row.names = FALSE)
+
+```
+
+```{r, echo=F}
+
+simulation_results <- read_csv("sim1d")
+
+```
+
+```{r, echo=F}
+
+# Visualize 
+visualize_simulation_results <- function(simulation_results) {
+    group_by(simulation_results, h, x0) |>
+    summarise(bias2 = mean(error)^2, var = var(f_star)) |>
+    mutate(MSE = bias2 + var) |>
+    pivot_longer(bias2:MSE, names_to = "metric") |>
+    mutate(metric = factor(metric, levels = c("bias2", "var", "MSE"))) |>
+    ggplot(aes(h, value, color = metric)) + geom_line(size = 1, alpha = 0.8) + facet_wrap(~x0, labeller=as_labeller(c("0.1"="x0 = 0.1", "1"="x0 = 1")), scales = "free") + labs(title = "Performance Metrics of Local Average Estimator",
+       y = "Value",
+       x = "Bandwidth") +
+    scale_color_manual(name = "Metric", values = c("bias2" = "darkblue", "var" = "red", "MSE" = "green")) +
+    theme(legend.position = 'top')  
+}
+
+
+# Plot
+visualize_simulation_results(simulation_results)
+```
+
+### e.) Interpret the patterns you see in the plots produced under part d). In particular, compare the bias for $x = 0.1$ and $x = 1$. Can you propose an explanation for the difference?
+
+**DISCUSSION**: When we apply local averages with low bandwidths, less Y values are included within the numerator of the estimation function because the **majority of X observations can't fit into the interval (only smaller values)**. Even when it does, the associated Y value given by the function of X is sub 1.0 due to smaller Xs, resulting in an aggregate fraction which is lower than 1. **However, at larger bandwidths, larger X and Y values are included in the equations numerator. Bias explodes because we are allowing for more X and underfitting the polynomial shape of the true function (cons of local averages) -- at lower h values, the estimator is also low and close to the generated error term.** The turning points in both graphs graph are due to the **convexity change in that particular window where $x0 < h$.** This can be verified by plotting the model for generated Xs and zooming into the interval where we will find the same pattern. In short, the shape of the model function drives the error term.
+
+## Problem 2.
+
+### a.) Generate a sample of size $n = 1000$ from the model with $k = 5$ and $k = 8$. Implement the local averaging estimator $f_{h}(x)$ for h = 1, 1.5, 2, 2.5, 3, 3.5, 4. You will find that the estimator is often not well defined for the smaller values of h. Why? Make sure that your code can handle this event, i.e., it does not stop running with an error message.
+
+```{r}
+
+generate_predictors <- function(n, p) {
+    x <- matrix(rnorm(n*p, 0, 2), nrow = n, ncol = p)
+}
+
+# estimate model
+f_y_x <- function(x) {
+ prod = pmap_dbl(as.data.frame(x), prod)
+ 1 + prod
+}
+
+# Define common metrics from task definition
+x0s = 1
+hs = seq( 1, 4, by = 0.5 )
+
+n = 1000
+
+run_simulation <- function(x_generator,x0 = x0s, h = hs ) {
+    x <- generate_predictors(n,p)	
+    # Define target
+    y_exp <- f_y_x(x)
+    e <- rnorm(length(y_exp), mean = 0, sd = 1)
+    y <- y_exp + e
+    
+    # create map of all combinations between x0 and h
+    variables <- list(h = h, x0 = x0s)
+    h_x0 <- expand.grid(variables)
+    
+    map2_df(.x = h_x0$h, .y = h_x0$x0,  ~{
+    loc_avg <- local_avg(x, y, .x, .y)
+    t <- tibble(
+            h = .x, 
+            x0 = .y, 
+            f = f_y_x(rep(x0, p)), #evaluate performance
+            f_star = as.numeric(loc_avg),
+            error = as.numeric(f) - f_star
+        )        
+    return(t)} )
+    
+}
+
+```
+
+```{r}
+
+set.seed(1234)
+p = 5
+
+k5 <- run_simulation(generate_predictors)
+
+kable(x = head(k5), digits = 3, caption = 'Head of LAE w/ sample of 1000 and k =5') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+```{r}
+
+set.seed(1234)
+p = 8
+
+k8 <- run_simulation(generate_predictors)
+
+kable(x = head(k8), digits = 3, caption = 'Head of LAE w/ sample of 1000 and k =8') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+**DISCUSSION**: It is not well defined because while our evaluation is relatively high, **we can't afford to decrease the bandwidth to a certain level where any of the differences between each row observation and the evaluation point (for all X variables) misses the interval given by the bandwidth** (i.e. if we choose a $h=1$, then $h/2=0.5$, meaning all $X_{i}-x_{0}$ should be lower than 0.5). Especially knowing that we have the product of multiple values (k) across all X variables, making lots of values **evaluated to zero in the denominator of the estimator function**. The division with zero will result in missing values at certain pairs of h and x0.
+
+### b.) Repeat part a) many times, say, 1000. For each value of h, report i) the % of the time that the estimator was well defined; ii) the bias of the estimator; iii) the standard deviation of the estimator; iv) the root mean squared error $((bias^2 + var)^{1/2})$ as a percentage of the true value of $E(Y | X = x)$. (When you calculate the bias, standard deviation, etc., use only the cases in which the estimator was well defined.)
+
+```{r, eval = F}
+
+p = 5
+
+set.seed(1234)
+# Run simulation for k=5
+nsim <- 1000
+simulation_results5 <- map_df(
+    seq(nsim),
+    run_simulation,
+    x_generator = generate_predictors
+)
+
+write.csv(simulation_results5, "sim2a5", row.names = FALSE)
+
+```
+
+```{r, echo=F}
+
+simulation_results5 <- read_csv("sim2a5")
+
+```
+
+```{r, eval=F}
+
+p = 8
+
+set.seed(1234)
+# Run simulation for k=8
+nsim <- 1000
+simulation_results8 <- map_df(
+    seq(nsim),
+    run_simulation,
+    x_generator = generate_predictors
+)
+
+write.csv(simulation_results8, "sim2a8", row.names = FALSE)
+
+```
+
+```{r, echo=F}
+
+simulation_results8 <- read_csv("sim2a8")
+
+```
+
+```{r}
+#aggregate metrics
+agg_simulation_results5 <- simulation_results5 |>
+  group_by(h, x0, f) |>
+  summarise(bias2 = mean(error, na.rm = T)^2, sd = sd(f_star, na.rm = T), well_defined = 1-sum(is.na(f_star))/n()) |>
+  mutate(relativeRMSE = ((bias2 + sd^2)^(0.5))/f, k=5)
+
+kable(x = agg_simulation_results5 , digits = 3, caption = 'LAE w/ sample of 1000, simulated 1000x, k=5 and reported metrics') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+```{r}
+
+# aggregate metrics
+agg_simulation_results8 <- simulation_results8 |>
+  group_by(h, x0, f) |>
+  summarise(bias2 = mean(error, na.rm = T)^2, sd = sd(f_star, na.rm = T), well_defined = 1-sum(is.na(f_star))/n()) |>
+  mutate(relativeRMSE = ((bias2 + sd^2)^(0.5))/f, k=8)
+
+kable(x = agg_simulation_results8, digits = 3, caption = 'LAE w/ sample of 1000, simulated 1000x, k=8 and reported metrics') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+### c.) Repeat parts a) and b) with $n = 10,000$.
+
+*Note: instead of a 1000x simulations, I have only simulated 100 times due to the throttling and performance issues on my machine. (It took more than 2 hours and I skipped it).*
+
+```{r, eval=F}
+
+# set sample size
+n = 10000
+p = 5
+
+set.seed(1234)
+# Run simulation for k=5
+nsim <- 100
+simulation_results5 <- map_df(
+    seq(nsim),
+    run_simulation,
+    x_generator = generate_predictors
+)
+
+write.csv(simulation_results5, "sim2c5", row.names = FALSE)
+
+```
+
+```{r, echo=F}
+
+simulation_results <- read_csv("sim2c5")
+
+```
+
+*Note: instead of a 1000x simulations, I have only simulated 100 times due to the throttling and performance issues on my machine. (It took more than 2 hours and I skipped it).*
+
+```{r, eval=F}
+
+p = 8
+
+set.seed(1234)
+# Run simulation for k=8
+nsim <- 100
+simulation_results8 <- map_df(
+    seq(nsim),
+    run_simulation,
+    x_generator = generate_predictors
+)
+
+write.csv(simulation_results8, "sim2c8", row.names = FALSE)
+
+```
+
+```{r, echo=F}
+
+simulation_results <- read_csv("sim2c8")
+
+```
+
+```{r}
+
+agg_simulation_results5 <- simulation_results5 |>
+  group_by(h, x0, f) |>
+  summarise(bias2 = mean(error, na.rm = T)^2, sd = sd(f_star, na.rm = T), well_defined = 1-sum(is.na(f_star))/n()) |>
+  mutate(relativeRMSE = ((bias2 + sd^2)^(0.5))/f, k=5)
+
+
+agg_simulation_results8 <- simulation_results8 |>
+  group_by(h, x0, f) |>
+  summarise(bias2 = mean(error, na.rm = T)^2, sd = sd(f_star, na.rm = T), well_defined = 1-sum(is.na(f_star))/n()) |>
+  mutate(relativeRMSE = ((bias2 + sd^2)^(0.5))/f, k=8)
+
+all_kdata = rbind(agg_simulation_results5, agg_simulation_results8)
+
+kable(x = all_kdata, digits = 3, caption = 'LAE w/ sample of 10,000, simulated 1000x k=8,5 and reported metrics') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+### d.) Discuss the results
+
+```{r}
+
+# Visualize 
+visualize_simulation_results_k <- function(simulation_results) {
+    pivot_longer(simulation_results, c("bias2", "sd", "relativeRMSE"), names_to = "metric") |>
+    mutate(metric = factor(metric, levels = c("bias2", "sd", "relativeRMSE"))) |>
+    ggplot(aes(h, value, color = metric)) + geom_line(size = 1, alpha = 0.8) + facet_wrap(~k, labeller=as_labeller(c("5"="k = 5", "8"="k = 8")), scales = "free") + labs(title = "Performance Metrics of Local Average Estimator",
+       y = "Value",
+       x = "Bandwidth") +
+    scale_color_manual(name = "Metric", values = c("bias2" = "darkblue", "sd" = "red", "relativeRMSE" = "green")) +
+    theme(legend.position = 'top')  
+}
+
+# Plot
+visualize_simulation_results_k(all_kdata)
+
+```
+
+**DISCUSSION**: At k=5 the relative RMSE floats is below 0.5, while bias and standard deviation move contrary to each other as per the bias-variance tradeoff for both k=5 and k=8. On the second figure, the same tradeoff can be noticed, but the **relative RMSE is marginally higher as well as the bias and stardard deviation per bandwidth. This is due to the curse of dimensionality (adding 3 more regressors).**
+
+## Problem 3.
+
+### a.) Prove that $\beta_{0}^* = \text{E}[\text{Y}]$ solves $min_{\beta_{0}}\text{E}[(\text{Y}-\beta_{0})^2]$
+
+1. Let's decompose the square term according to the **"remarkable identity" ($(a - b)^2 = a^2 - 2ab + b^2$)**
+
+$$
+\text{E}[(\text{Y}-\beta_{0})^2] = \text{E}[\text{Y}^2 - 2\text{Y}\beta_{0} + \beta_{0}^2]
+$$
+
+2. Given that we want to optimize along $\beta_{0}$, we can **take the partial derivative of the optimization function.**
+
+$$
+\frac{\partial}{\partial \beta_{0}} \text{E}[\text{Y}^2 - 2\text{Y}\beta_{0} + \beta_{0}^2] = \text{E}[- 2\text{Y} + 2\beta_{0}]
+$$
+
+3. We know that $\beta_{0}$ is a constant, therefore $\text{E}[\beta_{0}] = \beta_{0}$, which reduces the equation to:
+
+$$
+\text{E}[- 2\text{Y} + 2\beta_{0}] = \text{E}[- 2\text{Y}] + 2\beta_{0}
+$$
+
+4. To find the optimal $\beta_{0}$, we have to **set the partial derivative to zero according to the first order condition (FOC).**
+
+$$
+\text{E}[- 2\text{Y}] + 2\beta_{0} = -2(\text{E}[\text{Y}] - \beta_{0}) = 0
+$$
+
+5. We can divide both sides with $-2$ and add $\beta_{0}$ to both sides to get the optimal $\beta_{0}$, q.e.d.
+
+$$
+\text{E}[\text{Y}] = \beta_{0}^*
+$$
+
+6. **Which is the same as our hypothesis, q.e.d.**
+
+### b.) Knowing the following equations:
+
+$$
+\text{Y} = \beta_{0}^* + \epsilon \; where \; \beta_{0}^*=\text{E}[\text{Y}] \; and \; \text{E}(\epsilon) = 0
+$$
+
+0. Show that:
+
+$$
+\hat{\beta_{0}}=\overline{\text{Y}}
+$$
+
+1. From the definition of OLS, the **sum of squared residuals are:**
+
+$$
+\sum_{n=1}^{n} u_{i}^{2} = \sum_{n=1}^{n}(y_{i}-\beta_{0})^2
+$$
+
+2. We can **take the partial derivative of the sum of squared residuals wrt. $\beta_{0}$ and set it equal to zero** to arrive to the "least sum of squares" minimizing the residuals.
+
+$$
+\frac{\partial}{\partial \beta_{0}}\sum_{n=1}^{n}(y_{i}-\beta_{0})^2 = -2\sum_{n=1}^{n}(y_{i}-\beta_{0}) = 0
+$$
+
+3. Dividing both sides by $-2$ and decomposing the sum term, we get:
+
+$$
+\sum_{n=1}^{n}y_{i} = \sum_{n=1}^{n}\beta_{0}
+$$
+
+4. Let's divide both sides by $1/n$:
+
+$$
+\frac{1}{n}\sum_{n=1}^{n}y_{i} = \frac{1}{n}\sum_{n=1}^{n}\beta_{0}
+$$
+
+5. We can see from here that the **LHS of the equation is the sample mean and RHS is the estimator of $\beta_{0}$, q.e.d.**
+
+$$
+\overline{\text{Y}} = \frac{1}{n}\sum_{n=1}^{n}y_{i} = \frac{1}{n}\sum_{n=1}^{n}\beta_{0} = \hat{\beta_{0}}
+$$
+
+### c.) Show that $\hat{\beta_{0}}$ is an unbiased predictor of $Y$.
+
+1. We have to essentially prove that the expected value of $\hat{\beta_{0}}$ equals to the true intercept.
+
+$$
+\text{E}[\hat{\beta_{0}}] = \beta_{0}
+$$
+
+2. We know the following two equations: Both are acquired using the assumption of OLS that the sample is **identically distributed and follows the population model**. Therefore, we can average across $i$.
+
+$$
+\hat{\beta_{0}} = \overline{\text{y}} - \hat{\beta_{1}}\overline{\text{x}} \; and \; \overline{\text{y}} = \beta_{0} + \beta_{1}\overline{\text{x}} + \overline{\text{u}}
+$$
+
+3. We can then substitute $\overline{\text{y}}$ into the first equation.
+
+$$
+\hat{\beta_{0}} = \beta_{0} + \beta_{1}\overline{\text{x}} + \overline{\text{u}} - \hat{\beta_{1}}\overline{\text{x}}
+$$
+
+4. Factorizing by $\overline{\text{x}}$, we get:
+
+$$
+\hat{\beta_{0}} = \beta_{0} + \overline{\text{x}}(\beta_{1} - \hat\beta_{1}) +  \overline{\text{u}}
+$$
+
+5. Taking the conditional expectations wrt. to $x$ the equation results in a form of:
+
+$$
+\text{E}[\hat{\beta_{0}}|\text{x}] = \text{E}[\beta_{0}|\text{x}] + \text{E}[\overline{\text{x}}(\beta_{1} - \hat\beta_{1})|\text{x}] +  \text{E}[\overline{\text{u}}|\text{x}]
+$$
+
+6. We can now make the following transformations:
+
+  - The conditional expectations of $\beta_{0}$ and $\beta_{1}$ are equal to $\beta_{0}$ and $\beta_{1}$, respectively given that are both **constant and independent from the estimator**. 
+  - We also know from the **zero conditional mean assumption of OLS (SLR4)** that the expected value of residuals given $x$ is zero, therefore the average is also zero.
+  - Lastly, the conditional expectation of $\overline{\text{x}}$ given $x$ is going to be equal to $\overline{\text{x}}$ so we can move that out from the conditional term.
+
+$$
+\text{E}[\hat{\beta_{0}}|\text{x}] = \beta_{0} + \overline{\text{x}}(\beta_{1} - \text{E}[(\hat\beta_{1})|\text{x}])
+$$
+
+7. **We know from other proofs of the OLS that $\hat{\beta_{1}}$ is unbiased**, thus, $\text{E}[(\hat\beta_{1})|\text{x}]$ equals to $\beta_{1}$, resulting in a zero in the parenthesis multiplied by $\overline{\text{x}}$.
+
+$$
+\text{E}[\hat{\beta_{0}}|\text{x}] = \beta_{0} + \overline{\text{x}}(\beta_{1} - \beta_{1}) = \beta_{0} + 0
+$$
+$$
+\text{E}[\hat{\beta_{0}}|\text{x}] = \beta_{0} + \overline{\text{x}}(\beta_{1} - \beta_{1}) = \beta_{0} + 0
+$$
+
+8. Let's take the expected value of both sides. $\text{E}[\beta_{0}]$ will be $\beta_{0}$ as showed before. The **law of iterative expectations (LIE) states that $\text{E}[\text{E}[\hat{\beta_{0}}|\text{x}]]$ is equal to $\text{E}[\hat{\beta_{0}}]$** 
+
+9. Hence, we finally arrive at, **which is exactly what we wanted to prove, q.e.d:**
+
+$$
+\text{E}[\hat{\beta_{0}}] = \beta_{0}
+$$

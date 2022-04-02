@@ -1,0 +1,287 @@
+---
+title: "DS1 - Problem Set 2."
+author: "Son N. Nguyen"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document:
+    fig_caption: yes
+    latex_engine: xelatex
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = T, message = F, warning = F, fig.align="center", fig.width = 8, fig.height = 5)
+
+```
+
+```{r, echo=F}
+library(tidyverse)
+library(glmnet)
+library(factoextra)
+library(pls)
+library(kableExtra)
+library(knitr)
+theme_set(theme_minimal())
+```
+
+## Problem 1.
+
+### a.) From $min_{b}[\sum_{i=1}^{n}(Y_{i}-b)^2+\lambda*b^2]$, $\lambda >= 0$ show that the solution is:
+
+$$
+\hat{\beta_{0}}^{ridge} = \frac{\sum_{i=1}^{n}Y_{i}}{n+\lambda}
+$$
+
+Step 1. Decompose square term and set up the partial derivative function w.r.t. b
+
+$$
+min_{b}[\sum_{i=1}^{n}(Y_{i}-b)^2+\lambda*b^2] = min_{b}[\sum_{i=1}^{n}(Y_{i}^2-2Y_{i}b+b^2)+\lambda*b^2]
+$$
+
+Step 2. Take partial derivative of the target function
+
+$$
+\frac{\partial}{\partial b}\sum_{i=1}^{n}(Y_{i}^2-2Y_{i}b+b^2)+\lambda*b^2 = \sum_{i=1}^{n}(-2Y_{i}+2b)+2\lambda*b
+$$
+
+Step 3. Extract multipliers and term b from the sum formula and set it to zero according to FOC in optimization
+
+$$
+-2\sum_{i=1}^{n}Y_{i}+2bn+2\lambda*b = 0
+$$
+Step 4. Dividing the whole equation with 2 and factoring out b, we will arrive to:
+
+$$
+-\sum_{i=1}^{n}Y_{i}+b(n+\lambda) = 0
+$$
+Step 5. Moving the first term to the RHS of the equation and perform a division by $(n+\lambda)$ (it is not zero based on the assumption that n and lambda are two non-negative values), we will arrived to the desired solution, q.e.d.
+
+$$
+\hat{\beta_{0}}^{ridge} = b = \frac{\sum_{i=1}^{n}Y_{i}}{(n+\lambda)}
+$$
+
+**Discussion**: It's difference from the OLS coefficient estimator $\hat{\beta_{0}}^{OLS} = \overline{Y}$ is only the appearance of $\lambda$ in the denominator (as $\frac{\sum_{i=1}^{n}Y_{i}}{n} = \overline{Y}$). Therefore, it means that a higher penalty parameter would lead to lower coefficient values, and intuitively would shrink more aggressively the estimated $\beta$ coefficient towards zero (never reaches it actually).
+
+### b.) Suppose that ${\beta_{0}} = 1$ and $\epsilon ∼ N(0, \sigma^2)$ with $\sigma^2 = 4$. Generate a sample of size $n = 10$ from the model and compute $\hat{\beta_{0}}^{ridge}$ for a grid of \lambda values over the interval $[0, 20]$.
+
+```{r}
+
+set.seed(1234)
+
+n=10
+
+#generate ys from the simplest model
+generate_sample <- function(n) {
+    e <- rnorm(n, mean = 0, sd = 2)
+    1 + e
+}
+
+#implement derived formula for beta
+compute_ridge <- function(lambda) {
+  y <- generate_sample(n)
+  rbeta <- sum(y)/(length(y)+lambda)
+}
+
+#simulation
+run_simulation <- function(lambdas,n){
+  
+  map_df(lambdas, ~{
+      model <- lapply(.x, compute_ridge)
+      tibble(
+          lambda = .x,
+          beta_hat = as.numeric(model),
+          beta_zero = 1,
+          error = beta_zero - beta_hat
+      )
+  })
+
+}
+
+sim1 <- run_simulation(n=10, lambdas=seq(0,20, 0.5))
+
+kable(x = head(sim1), digits = 3, caption = 'Head of Sample') %>% 
+  kable_styling(latex_options = c("hold_position","striped"), font_size = 8)
+
+```
+
+### c.) Repeat part b), say, 1000 times so that you end up with 1000 estimates of $\beta_{0}$ for all the $\lambda$ values that you have picked. For each value of $\lambda$, compute bias, variance, and MSE.
+
+```{r}
+
+n = 10
+
+# simulate 1k times
+set.seed(1234)
+nsim = 1000
+simulation_results <- map_df(
+    seq(nsim),
+    run_simulation,
+    lambdas = seq(0,20,1)
+)
+
+# add metrics
+df <- group_by(simulation_results, lambda) |>
+summarise(bias2 = mean(error)^2, var = var(beta_hat)) |>
+mutate(MSE = bias2 + var)
+
+kable(x = head(df), digits = 3, caption = 'Head of Error metrics') %>% 
+  kable_styling(latex_options = c("hold_position","striped"), font_size = 8) 
+
+```
+
+### d.) Plot metrics as a function of $\lambda$ and interpret the results.
+
+```{r}
+
+visualize_simulation_results <- function(simulation_results) {
+  pivot_longer(df, bias2:MSE, names_to = "metric") |>
+  mutate(metric = factor(metric, levels = c("bias2", "var", "MSE"))) |>
+  ggplot(aes(lambda, value, color = metric)) + geom_line(size = 1, alpha = 0.8) +
+  labs(title = "Performance Metrics of Ridge Estimator",
+     y = "Value",
+     x = "Lambda") +
+  scale_color_manual(name = "Metric", values = c("bias2" = "darkblue", "var" = "red", "MSE" = "green")) +
+  theme(legend.position = 'top')
+}
+
+#visualize
+visualize_simulation_results(df)
+
+```
+
+**Discussion**: As we shrink more aggressively out coefficients, **bias increase and variance decreases initially. This is a known pattern of shrinkage methods.** In overall, MSE decreases at lower lambdas because we managed to decreased variance with a larger pace than bias, gaining a bit of advantage (optimal at around lambda = 6), but **after the sweet spot, we are losing more accuracy in trade-off of variance and MSE starts to rise.**
+
+## Problem 2.
+
+The population version of the optimization problem that defines the first principal component of the two variables is
+
+$$
+max_{u1, u2}Var(u_{1}X+u_{2}Y) \; subject \; to \; u_{1}^2 + u_{2}^2 = 1
+$$
+
+### a.) Suppose that $Var(X) > Var(Y)$ and $cov(X,Y) = E(XY) = 0$. Derive the first principle component vector. Draw an illustrative picture and explain the result intuitively.
+
+(Hint: expand the variance formula and substitute the constraint. Then carry out the minimization.)
+
+Step 1. Use alternative formula of variance
+
+$$
+max_{u1, u2}[u_{1}^2Var(X) + u_{2}^2Var(Y)] \; subject \; to \; u_{1}^2 + u_{2}^2 = 1
+$$
+
+Step 2. Factor out $u_{1}$ from the variance term
+
+$$
+max_{u1, u2}[\frac{u_{1}^2}{N}\sum_{i=1}^{n}(X_{i}-\mu_{x})^2 + \frac{u_{2}^2}{N}\sum_{i=1}^{n}(Y_{i}-\mu_{y})^2]
+$$
+
+Step 3. Substitute the constraint and take full derivative of the optimization function
+
+$$
+\frac{\partial}{\partial u_{1}}[\frac{u_{1}^2}{N}\sum_{i=1}^{n}(X_{i}-\mu_{x})^2 + \frac{1-u_{1}^2}{N}\sum_{i=1}^{n}(Y_{i}-\mu_{y})^2]
+$$
+Step 4. Set the derivative to 0 (FOC)
+
+$$
+\frac{2u_{1}}{N}\sum_{i=1}^{n}(X_{i}-\mu_{x})^2 - \frac{2u_{1}}{N}\sum_{i=1}^{n}(Y_{i}-\mu_{y})^2 = 0
+$$
+Step 5. Simplify by dividing both sides with 1/N and 2
+
+$$
+u_{1}\sum_{i=1}^{n}(X_{i}-\mu_{x})^2 - u_{1}\sum_{i=1}^{n}(Y_{i}-\mu_{y})^2 = 0
+$$
+Step 6. Factor out $u_{1}$ and plug in zero for both means as we know that they are zero for X and Y. In this case, either $u_{1}$ or the sum term has to be zero.
+
+Note that deriving for $u_{2}$, we will arrive to the same end-result.
+
+$$
+u_{1}(\sum_{i=1}^{n}[X_{i}^2 - Y_{i}^2]) = 0
+$$
+Step 7. Using the assumptions that $Var(X) > Var(Y)$ and $cov(X,Y) = E(XY) = 0$, we can conclude that the above equation is only satisfied if $u_{1}^* = 0$, given that X and Y are uncorrelated and the variance along the horizontal pane will be higher, thus we catch more variance with a vertical vector. This also means that $u_{2}^* = 1$ from the constraint.
+
+$$
+(u_{1}^*,u_{2}^*) = (0,1)
+$$
+
+**Discussion**: We know that X and Y are uncorrelated and the first principal component vector can only take up values of (1,0) or (0,1). taking into account the other assumption that Var(X) > Var(Y) means that the horizontal dispersion is larger in overall. **All in all, the first principal vector will be $(u_{1}^*, u_{2}^*) = (0,1)$.** This is verified with the figure below which shows that larger percentage of variances can be explained along the X, thus the the first vector will pick up a vertical vector maximizing the horizontal variance. This is why PCA often uses scaling which evens out the playing field for both axis.
+
+```{r}
+
+set.seed(1234)
+x <- rnorm(1000, mean= 0, sd=2)
+y <- rnorm(1000, mean= 0, sd=1)
+pcdf <- cbind(x, y)
+data_dep <- prcomp(pcdf, scale. = FALSE)
+fviz_pca(data_dep)
+
+```
+
+### b.) Suppose that $Var(X) = Var(Y) = 1$ (principle component analysis is often performed after standardization) and $cov(X, Y) = E(XY) = 0$. Show that in this case any vector $(u_{1} ,u_{2})$ with length 1 is a principal component vector (i.e., it solves the problem above). Explain intuitively this puzzling result. (A picture can help.)
+
+Start with the previously given optimization problem
+
+$$
+max_{u1, u2}[u_{1}^2Var(X) + u_{2}^2Var(Y)] \; subject \; to \; u_{1}^2 + u_{2}^2 = 1
+$$
+
+After scaling.... $Var(X) = Var(Y) = 1$
+
+$$
+max_{u1, u2}[u_{1}^2 + u_{2}^2] \; subject \; to \; u_{1}^2 + u_{2}^2 = 1
+$$
+Plugging int the constraint (length have to be unit re: Pythagoras theorem)
+
+$$
+max_{u1}[u_{1}^2 + (1-u_{1}^2)]
+$$
+Subtracting the $u_{1}$ terms, we are left with a constant of 1.
+
+$$
+max_{u1,u2}[1]
+$$
+
+**Discussion:**  It means that whatever $u_{1}$ and hence $u_{2}$ picks up w.r.t. the constrains that their sum of squares are equal to 1 (or length is 1), the variance is always going to be 1. This stems from the fact that the Variance of both X and Y is 1, thus **data points are scattering evenly around the origin**. We can set the vector in whatever direction along the unit circle, we will get the same variance fixed variance of 1 when projecting each observation to the line determined by the first principal component vector. 
+
+This is verified by the visualization below where I generated a sample of X, and Y with a unit variance (standardized). It is indicated in the graph that the **variance explained by each axis is around 50% which means that the principal component vector can pick up and arbitrary vector of length 1.**
+
+```{r}
+
+set.seed(1234)
+x <- rnorm(1000, mean= 0, sd=1)
+y <- rnorm(1000, mean= 0, sd=1)
+pcdf <- cbind(x, y)
+data_dep <- prcomp(pcdf)
+fviz_pca(data_dep)
+
+```
+
+## Problem 3.
+
+ISLR Exercise 3 in Section 6.8 (p. 260). Please use the version of the textbook posted online (7th printing).
+
+Suppose we estimate the regression coeﬃcients in a linear regression model by minimizing
+
+$$
+RSS = \sum_{i=1}^{n}(y_{i}-\beta_{0}-\sum_{j=1}^{p}\beta_{j}x_{ij})^2 \; subject \; to \; \sum_{j=1}^{p}|\beta_{j}|\leq s
+$$
+
+### a.) As we increase s from 0, the training RSS will:
+
+**Answer**: (iv) Steadily decrease -- As we increase s from 0, all $\beta$s increase from 0 to their least square estimate values
+
+b.) Repeat (a) for test RSS.
+
+**Answer**: (ii) Decrease initially, and then eventually start increasing in a U shape: We start at the highest RSS when s=0 because than all the $\beta$ coefficients are also zero. Same as in the training set, when we lift off from s=0, coefficients approach the OLS fit estimates and RSS starts to decrease. However, coefficients tend to overfit the sample training data which can increase the test RSS in the later stages.
+
+c.) Repeat (a) for variance.
+
+**Answer**: (iii) Steadily increase: When s=0, we have no variance whatsoever because our model estimates a constant (no coefficients picking up the variance of Xs). When we start to increase s from zero, $\beta$s start to appear and At this point, the values of β s become highly dependent on training data, thus increasing the variance in overall.
+
+d.) Repeat (a) for (squared) bias.
+
+**Answer**: (iv) Steadily decrease: When s=0, bias is relatively large (estimate far off from the true value), since, we are estimating the constant. $\beta$ coefficients start to increase once we push s to higher values, therefore decrease the bias gradually.
+
+e.) Repeat (a) for the irreducible error.
+
+**Answer**: (v) Remains constant: As the name states, this is an irreducible error, hence it is independent of how s evolves.
