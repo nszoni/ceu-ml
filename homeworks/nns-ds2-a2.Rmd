@@ -15,16 +15,14 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, messages = FALSE, tidy.opts=
 
 ## Requirements
 
+I chose to work with only keras, therefore we only need the tidyverse and keras package. Loaded the `htmlwidgets` and `webshots` additionally to save history plots in the viewer page.
+
 ```{r req, results='hide', message=FALSE}
 
-# Loading packages with pacman
-if (!require("pacman")) {
-  install.packages("pacman")
-}
-
-pacman::p_load(tidyverse, h2o, keras, glue, imager)
-
-theme_set(theme_minimal())
+library(tidyverse)
+library(keras)
+library(htmlwidgets)
+library(webshot)
 
 ```
 
@@ -37,6 +35,8 @@ Take the famous “MNIST dataset” with handwritten digits. Your task is to cor
 Since this is a classification problem, a good evaluation metric would be AUC based on the loss function we define beforehand, let it be a categorical crossentropy or whatnot. The categorical crossentropy is well suited to classification tasks, since one example can be considered to belong to a specific category with probability 1, and to other categories with probability 0.
  
 ### b.) Get the data and show some example images from the data.
+
+Loading the training data which I will split into training, validation, and test. The test data supplied by kaggle is only for submission and not testing.
 
 ```{r}
 # got the data from kaggle
@@ -80,7 +80,7 @@ showImages(full, 1:12)
 
 The general pre-processing of image classes includes the following steps:
 1. Re-scale pixel values
-2. Split data to train and test set -- I have used an 80-20 split
+2. Split data to train, validation and test set -- I have used an 80-20 splits
 3. Separate features and labels as matrices
 
 ```{r}
@@ -91,13 +91,13 @@ full_set <- mutate(full,
     across(-label, ~./255)
 )
 
-#Data partition to train and test set
+#Data partition to work and test set
 set.seed(1234)
 ind<-sample(nrow(full_set),size=floor(0.8*nrow(full_set)))
 work<-full_set[ind,]
 test<-full_set[-ind,]
 
-#carve out validation
+#split work set further to train and validation set, put aside the test set
 set.seed(1234)
 ind<-sample(nrow(work),size=floor(0.8*nrow(work)))
 train<-work[ind,]
@@ -116,7 +116,7 @@ data_valid_y <- to_categorical(tbl_valid$label, 10)
 
 ```
 
-Let's initialize the keras sequential model where I have decided to build a single hidden layer with 32 nodes and a ReLU activation function withing the hidden layer, while softmax was initialized in the output layer which is the best practice for predicting a label among multiple categories. Lastly, we are dropping out sets of inputs with a rate of 20% to regularize and reduce overfitting (i.e. randomly selected neurons are ignored during training).
+Let's initialize the keras sequential model where I have decided to build a single hidden layer with 32 nodes and a ReLU activation function within the hidden layer, while softmax was initialized in the output layer which is the best practice for predicting a label among multiple categories. Lastly, we are dropping out sets of inputs with a rate of 20% to regularize and reduce overfitting (i.e. randomly selected neurons are ignored during training).
 
 ```{r keras-model}
 
@@ -144,22 +144,35 @@ compile(
 )
 ```
 
-When fitting the neural net to our training set, we can see that there are 32*785 parameters in the first hidden layer, which means we have 25120 weights and 
+When fitting the neural net to our training set, we can see that there are 32*785 parameters in the first hidden layer, which translates to 784 input weights and 1 bias for each node which totals to 25120.
+
+> Note: I wanted to save the Markdown compiling time, hence, I saved the generated history plots and model parameters in my working folder.
 
 ```{r keras-model-training}
-history_simple <- fit(
-    simple_keras, data_train_x, data_train_y,
-    epochs = 30, batch_size = 20,
-    validation_data = list(data_valid_x, data_valid_y)
-)
 
-plot(history_simple)
+# history_simple <- fit(
+#     simple_keras, data_train_x, data_train_y,
+#     epochs = 30, batch_size = 20,
+#     validation_data = list(data_valid_x, data_valid_y)
+# )
 
-keras::save_model_hdf5(simple_keras, 'simple_keras.h5')
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+#png('history_simple.png', width = 800, height = 600)
+#plot(history_simple)
+#invisible(dev.off())
+
+#save model
+keras::save_model_hdf5(simple_keras, 'models/simple_keras.h5')
+
+#load model
+simple_keras <- keras::load_model_hdf5('models/simple_keras.h5')
+
+#load plot
+knitr::include_graphics('history_simple.png')
 
 ```
 
-With the simplest model, we are already achieving a 0.96% accuracy on the validation set.
+With the simplest model, we are already achieving a 95,5% accuracy on the validation set.
 
 ```{r keras-model-evaluation}
 evaluate(simple_keras, data_valid_x, data_valid_y)
@@ -169,7 +182,7 @@ evaluate(simple_keras, data_valid_x, data_valid_y)
 
 ### + Nodes + Dropout rate 
 
-Let's see what changes if we increase the number of nodes and the dropout rate.
+Let's see what changes if we increase the number of nodes and the dropout rate. We are now estimating 300*785 parameters with 300 bias parameters estimated.
 
 ```{r}
 
@@ -193,17 +206,26 @@ compile(
 
 ```
 
+The model has marginally improved and now has a validation accuracy of 97.3%. The training accuracy increases with a larger pace than its pair calculated for the validation set. It seems that the loss at each epoch for the validation set is upward sloping.
+
 ```{r keras-model-training}
 
-history_l <- fit(
-    keras_l, data_train_x, data_train_y,
-    epochs = 30, batch_size = 30,
-    validation_data = list(data_valid_x, data_valid_y)
-)
+# history_l <- fit(
+#     keras_l, data_train_x, data_train_y,
+#     epochs = 30, batch_size = 30,
+#     validation_data = list(data_valid_x, data_valid_y)
+# )
 
-plot(history_l)
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_l.png', width = 800, height = 600)
+# plot(history_l)
+# invisible(dev.off())
 
-keras::save_model_hdf5(keras_l, 'keras_l.h5')
+keras::save_model_hdf5(keras_l, 'models/keras_l.h5')
+
+keras_l <- keras::load_model_hdf5('models/keras_l.h5')
+
+knitr::include_graphics('history_l.png')
 
 ```
 
@@ -242,18 +264,26 @@ compile(
 ```
 
 ```{r keras-model-training}
-history_xl <- fit(
-    keras_xl, data_train_x, data_train_y,
-    epochs = 30, batch_size = 30,
-    validation_data = list(data_valid_x, data_valid_y)
-)
+# history_xl <- fit(
+#     keras_xl, data_train_x, data_train_y,
+#     epochs = 30, batch_size = 30,
+#     validation_data = list(data_valid_x, data_valid_y)
+# )
 
-plot(history_xl)
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_xl.png', width = 800, height = 600)
+# plot(history_xl)
+# invisible(dev.off())
 
-keras::save_model_hdf5(keras_xl, 'keras_xl.h5')
+keras::save_model_hdf5(keras_xl, 'models/keras_xl.h5')
+
+keras_xl <- keras::load_model_hdf5('models/keras_xl.h5')
+
+knitr::include_graphics('history_xl.png')
+
 ```
 
-It managed to improve the results as expected. Generally, more layers and nodes mean more flexibility, but at a certain point the model starts to learn the residuals of the train set and performs poorly on the validation set. That's what we want to solve in the next model choice.
+It managed to improve the results as expected and now we have a 97.4% validation accuracy. Generally, more layers and nodes mean more flexibility, but at a certain point the model starts to learn the generated noises of the train set and performs worse on the validation set. The next step would be implement a data augmentation strategy or regularize the dense layers more aggressively so that the model is less likely to learn the noise.
 
 ```{r keras-model-evaluation}
 evaluate(keras_xl, data_valid_x, data_valid_y)
@@ -293,19 +323,26 @@ compile(
 
 ```
 
-Again we have in overall a better accuracy on both the train and test set, but at the same time we can see from the loss-accuracy plot that both have stagnating for the validation set. The test and validation curves are not smoothed to one-another and the test metrics overcome marginally the out-of-sample performance. This indicates that our model can improve in generalization.
+Again we have in overall a slightly worse accuracy on both the train and test set, but at the same time we can see from the loss-accuracy plot that both have stagnating for the validation set. The test and validation curves are not smoothed to one-another and the test metrics overcome marginally the out-of-sample performance. This indicates that our model can improve in terms of generalization.
 
 ```{r keras-model-training}
 
 history_xxl <- fit(
     keras_xxl, data_train_x, data_train_y,
-    epochs = 50, batch_size = 30,
+    epochs = 30, batch_size = 30,
     validation_data = list(data_valid_x, data_valid_y)
 )
 
-plot(history_xxl)
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_xxl.png', width = 800, height = 600)
+# plot(history_xxl)
+# invisible(dev.off())
 
-keras::save_model_hdf5(keras_xxl, 'keras_xxl.h5')
+keras::save_model_hdf5(keras_xxl, 'models/keras_xxl.h5')
+
+keras_xxl <- keras::load_model_hdf5('models/keras_xxl.h5')
+
+knitr::include_graphics('history_xxl.png')
 
 ```
 
@@ -319,8 +356,13 @@ Many suggests that the classical SGD optimizer can outperform in some cases the 
 
 ```{r}
 
+#copy keras xxl
+keras_sgd <- keras_xxl
+
+summary(keras_sgd)
+
 compile(
-    keras_xxl,
+    keras_sgd,
     loss = 'categorical_crossentropy',
     optimizer = optimizer_sgd(),
     metrics = c('accuracy')
@@ -328,30 +370,36 @@ compile(
 
 ```
 
-Again we have in overall a better accuracy on both the train and test set, but at the same time we can see from the loss-accuracy plot that there exist a slight pattern of overfitting as validation accuracy s downward sloping in higher epochs. In other words, the test and validation curves are not smoothed to one-another and the test metrics overcome marginally the out-of-sample performance. This indicates that our model can improve in generalization.
+It was indeed the case we have a slightly better accuracy on both the train and validation set (98,2% in the latter). The lack of convergence is also due to the optimization technique which may require more iterations to converge.
 
 ```{r keras-model-training}
 
-history_xxl2 <- fit(
-    keras_xxl, data_train_x, data_train_y,
+history_sgd <- fit(
+    keras_sgd, data_train_x, data_train_y,
     epochs = 30, batch_size = 30,
     validation_data = list(data_valid_x, data_valid_y)
 )
 
-plot(history_xxl2)
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_sgd.png', width = 800, height = 600)
+# plot(history_sgd)
+# invisible(dev.off())
 
-keras::save_model_hdf5(keras_xxl2, 'keras_xxl2.h5')
+keras::save_model_hdf5(keras_sgd, 'models/keras_sgd.h5')
+
+keras_sgd <- keras::load_model_hdf5('models/keras_sgd.h5')
+
+knitr::include_graphics('history_sgd.png')
 
 ```
-It seems that we have a better accuracy but the validation loss increases over time pointing to a pattern of overfitting. The next step would be implement a data augmentatition strategy or regularize the dense layers more aggresissively so that the model is less likely to learn the noise.
 
 ```{r keras-model-evaluation}
-evaluate(keras_xxl, data_valid_x, data_valid_y)
+evaluate(keras_sgd, data_valid_x, data_valid_y)
 ```
 
 ### CNN
 
-We have seen that training a fully connected neural network was able to give as a validation accuracy of 98.3%. It's pretty solid but let's see how a CNN performs on the dataset.
+We have seen that training a fully connected neural network was able to give us a validation accuracy of 97.1% when using multiple layers and regularization strategies suggested in the best practice. It's pretty solid for a classifier but let's see how a CNN can improve the result even more.
 
 First we need to reshape our dataset in preparation of CNN
 
@@ -360,34 +408,47 @@ data_train_2d_x <- array_reshape(data_train_x, c(nrow(data_train_x), 28, 28, 1))
 data_valid_2d_x <- array_reshape(data_valid_x, c(nrow(data_valid_x), 28, 28, 1))
 ```
 
-We have 3 x 3 weight parameters for each filter + bias. This is set by the `kernel_size` parameter which downscale the image from 28x28 to 26*26. With the `max_pooling` parameter, we further condense the image dimensions with grouping 2x2 pixels together and essentially halving the resuolution after each dense layer. 
+We have 3 x 3 weight parameters for each filter + bias. This is set by the `kernel_size` parameter which downscale the image from 28x28 to 26*26. With the `max_pooling` parameter, we further condense the image dimensions with grouping 2x2 pixels together and essentially halving the resolution after each dense layer. In addition, like in the feed-forward network, I equipped the model with dropout layers and kernel constraints.
 
 ```{r cnn-definition}
+
 cnn_model <- keras_model_sequential()
 cnn_model |>
     layer_conv_2d(filters = 64,kernel_size = c(3, 3),activation = 'relu',input_shape = c(28, 28, 1)) |>
+    layer_dropout(rate = 0.1) |>
     layer_max_pooling_2d(pool_size = c(2, 2)) |>
-    layer_conv_2d(filters = 64,kernel_size = c(3, 3),activation = 'relu') |>
+    layer_conv_2d(filters = 64,kernel_size = c(3, 3), kernel_constraint = constraint_maxnorm(2), activation = 'relu') |>
+    layer_dropout(rate = 0.2) |>
     layer_max_pooling_2d(pool_size = c(2, 2)) |>
-    layer_conv_2d(filters = 32,kernel_size = c(3, 3),activation = 'relu') |>
+    layer_conv_2d(filters = 32,kernel_size = c(3, 3), kernel_constraint = constraint_maxnorm(2), activation = 'relu') |>
     layer_dropout(rate = 0.2) |>
     layer_flatten() |>
     layer_dense(units = 16, activation = 'relu') |>
     layer_dense(units = 10, activation = 'softmax')
+
 ```
 
 ```{r cnn-summary}
 summary(cnn_model)
 ```
 
+Since this is a much more complex network, I have imposed callbacks on the learning. One of them is the early stopping which monitors the validation loss and stops the process if the subsequent 5 epochs are not improving via the `patience` parameter. This way, we can avoid further overfitting on the train set. Along with that, it is a good idea to add a checkpoint callback to be able to revert back to the best model. 
+
 ```{r cnn-setup}
 
 compile(
     cnn_model,
     loss = 'categorical_crossentropy',
-    optimizer = optimizer_rmsprop(),
+    optimizer = optimizer_adam(),
     metrics = c('accuracy')
 )
+
+#define early stopping callback
+early_stop <- keras::callback_early_stopping(monitor = 'val_loss', patience=5)
+
+#define checkpoint callback
+checkpoint <- keras::callback_model_checkpoint(filepath = 'models/best_cnn.h5', monitor = 'val_loss', save_best_only = TRUE)
+
 ```
 
 ```{r cnn-train}
@@ -395,22 +456,50 @@ compile(
 history_cnn <- fit(
     cnn_model, data_train_2d_x, data_train_y,
     epochs = 30, batch_size = 32,
-    validation_data = list(data_valid_2d_x, data_valid_y)
+    validation_data = list(data_valid_2d_x, data_valid_y),
+    steps_per_epoch = nrow(data_train_y)/32,
+    callbacks = c(early_stop, checkpoint)
 )
 
-keras::save_model_hdf5(cnn_model, 'cnn_model.h5')
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_cnn.png', width = 800, height = 600)
+# plot(history_cnn)
+# invisible(dev.off())
 
-plot(history_cnn)
+best_cnn <- keras::load_model_hdf5('models/best_cnn.h5')
+
+knitr::include_graphics('history_cnn.png')
+
 ```
-We can see that the validation accuracy increases over time at the expense of the measure loss. CNN yielded the highest accuracy so far with a value beyond 99% (99.06%) on the validation set.
+
+The algorithm callback decided to stop after 17 epochs because the validation loss has not improved in the last 5 steps. Loading the best model, CNN yielded the highest accuracy so far with a value close to 99% (98.84%) on the validation set.
 
 ```{r}
-evaluate(cnn_model, data_valid_2d_x, data_valid_y)
+evaluate(best_cnn, data_valid_2d_x, data_valid_y)
 ```
 
 ### CNN w/ data augmentation
 
 The last model I wanted to look at was a CNN with data augmentation method. For that we need to initialize train and validation data generators which rotate, zoom, shifts every image in all sorts of ways so that we have a larger sample for the train and validation fit.
+
+```{r}
+
+cnn_aug <- cnn_model
+
+compile(
+    cnn_aug,
+    loss = 'categorical_crossentropy',
+    optimizer = optimizer_adam(),
+    metrics = c('accuracy')
+)
+
+#define early stopping callback
+early_stop <- keras::callback_early_stopping(monitor = 'val_loss', patience=5)
+
+#define checkpoint callback
+checkpoint <- keras::callback_model_checkpoint(filepath = 'models/best_cnn_aug.h5', monitor = 'val_loss', save_best_only = TRUE)
+
+```
 
 ```{r data-augmentation}
 
@@ -441,30 +530,40 @@ valid_generator <- flow_images_from_data(
 )
 ```
 
-It looks like that overfitting happened as the validation accuracy decreases over epoch while the loss increases.
+The algo decided to revert back after the 24th epoch. The history figure looks healthy in a sense that validation materics are not volatile and surprisingly the model performs better on predicting the validation set.
 
 ```{r cnn-with-augmentation}
 
 history_cnn_aug <- fit(
     cnn_model,
     train_generator,
-    epochs = 50,
+    epochs = 30,
     steps_per_epoch = nrow(data_train_x) / batch_size,
     validation_data = valid_generator,
-    validation_steps = nrow(data_valid_x) / batch_size
+    validation_steps = nrow(data_valid_x) / batch_size,
+    callbacks = c(early_stop, checkpoint)
 )
 
-plot(history_cnn_aug)
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+# png('history_cnn_aug.png', width = 800, height = 600)
+# plot(history_cnn_aug)
+# invisible(dev.off())
 
-keras::save_model_hdf5(cnn_model, 'cnn_model_aug.h5')
+best_cnn_aug <- keras::load_model_hdf5('models/best_cnn_aug.h5')
+
+knitr::include_graphics('history_cnn_aug.png')
+
 ```
-Evaluating the the model on the validation set, we have an average accuracy of 98% percent which is marginally worse than the traditional CNN. I would expect this number to improve as we increase the number of epochs and allow more time for the algorithm to figure out the image modification noises.
+
+Evaluating the the model on the validation set, we managed to improve the accuracy even more to 99.17% on the validation set. I would expect this number to improve as we increase the number of epochs and patience parameter allowing more time for the algorithm to figure out the image modifications we made.
 
 ```{r}
-evaluate(cnn_model, data_valid_2d_x, data_valid_y)
+evaluate(best_cnn_aug, data_valid_2d_x, data_valid_y)
 ```
 
 ### e.) Choose a final model and evaluate it on the test set. How does test error compare to validation error?
+
+The final model based on the preliminary training of several ones is the CNN with data augmentation methods. The test error is marginally larger than that of the validation error (0.027 vs, 0.021) and the accuracy is slightly worse (99.15%) but still outperforms previous validation metrics before.
 
 ```{r}
 
@@ -476,7 +575,7 @@ data_test_y <- to_categorical(tbl_test$label, 10)
 
 data_test_2d_x <- array_reshape(data_test_x, c(nrow(data_test_x), 28, 28, 1))
 
-evaluate(cnn_model, data_test_2d_x, data_test_y)
+evaluate(best_cnn_aug, data_test_2d_x, data_test_y)
 
 ```
 
@@ -555,10 +654,6 @@ valid_generator <- flow_images_from_directory(
 
 ### d.) Build a simple convolutional neural network (CNN) to predict if an image is a hot dog or not. Evaluate your model on the test set. (Hint: Account for the fact that you work with colored images in the input_shape parameter: set the third dimension to 3 instead of 1.)
 
-### Preparation
-
-Let's label the data first based on its folder path
-
 ```{r, eval=F}
 
 #create labels
@@ -589,17 +684,26 @@ batch_size=15
 
 ```
 
+I've used a very similar CNN model built in the previous exercise.
 
+- ReLU activation functions within the nodes of hidden layers.
+- Kernel size of 3x3
+- The input shape is 128x128 pixels
+- A max pooling of 2x2 squares are applied on each layer.
+- Kernel constraint of MaxNorm(2) + dropout layers ensuring that we rescale weights beyond 2 and sampling the number of nodes active.
+- Softmax as an output activation function for exclusive categorization.
 
 ```{r}
 
 hd_cnn <- keras_model_sequential()
 hd_cnn |>
     layer_conv_2d(filters = 32,kernel_size = c(3, 3),activation = 'relu', input_shape = c(128, 128, 3)) |>
+    layer_dropout(rate = 0.1) |>
     layer_max_pooling_2d(pool_size = c(2, 2)) |>
-    layer_conv_2d(filters = 32,kernel_size = c(3, 3),activation = 'relu') |>
+    layer_conv_2d(filters = 32,kernel_size = c(3, 3), kernel_constraint = constraint_maxnorm(2), activation = 'relu') |>
+    layer_dropout(rate = 0.2) |>
     layer_max_pooling_2d(pool_size = c(2, 2)) |>
-    layer_conv_2d(filters = 16,kernel_size = c(3, 3),activation = 'relu') |>
+    layer_conv_2d(filters = 16,kernel_size = c(3, 3), kernel_constraint = constraint_maxnorm(2), activation = 'relu') |>
     layer_dropout(rate = 0.2) |>
     layer_flatten() |>
     layer_dense(units = 16, activation = 'relu') |>
@@ -609,41 +713,66 @@ summary(hd_cnn)
 
 ```
 
+Besides, compiling with an Adam SGD optimizer (best based on previous models, also beats RMSprop), I have initialized an early stopping and checkpoint callback with a patience of 5 epochs and target of validation loss. I have used a binomial crossentropy for this problem becuase we have only two classes.
+
 ```{r cnn-setup}
 
 compile(
     hd_cnn,
     loss = 'binomial_crossentropy',
-    optimizer = optimizer_rmsprop(),
+    optimizer = optimizer_adam(),
     metrics = c('accuracy')
 )
+
+#define early stopping callback
+early_stop <- keras::callback_early_stopping(monitor = 'val_loss', patience=5)
+
+#define checkpoint callback
+checkpoint <- keras::callback_model_checkpoint(filepath = 'models/best_hd_cnn.h5', monitor = 'val_loss', save_best_only = TRUE)
+
 ```
 
 ```{r cnn-train}
 
-history_hot_dog <- fit_generator(
+history_hot_dog <- fit(
     hd_cnn,
     train_generator,
     epochs = 30,
+    batch_size = 32,
     validation_data = valid_generator,
-    validation_steps=length(valid_generator$labels)/batch_size,
-    steps_per_epoch=length(train_generator$labels)/batch_size
+    validation_steps=length(valid_generator$labels)/32,
+    steps_per_epoch=length(train_generator$labels)/32,
+    callback = c(early_stop, checkpoint)
 )
 
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+png('history_hot_dog.png', width = 800, height = 600)
 plot(history_hot_dog)
+invisible(dev.off())
 
-keras::save_model_hdf5(hd_cnn, 'hd_cnn.h5')
+best_hd_cnn <- keras::load_model_hdf5('models/best_hd_cnn.h5')
 
-evaluate_generator(valid_generator, steps = length(valid_generator$labels))
+knitr::include_graphics('history_hot_dog.png')
+
+```
+
+TODO:
+
+```{r}
+
+evaluate_generator(best_hd_cnn, valid_generator, steps = length(valid_generator$labels))
 
 ```
 
 ### e.) Could data augmentation techniques help with achieving higher predictive accuracy? Try some augmentations that you think make sense and compare to your previous model.
 
+Personally, I would apply all sorts of image modifications because these pictures are highly diverse and taken from many angles, environment, and proximity. I went with shifting, zooming, rotating and flipping at the end.
+
 ```{r data-augmentation}
 
 batch_size <- 32
 
+# image augmentation
 train_datagen <- image_data_generator(
   rescale = 1/255,
   rotation_range = 20,
@@ -678,22 +807,49 @@ valid_generator <- flow_images_from_directory(
 
 ```
 
+All other artifacts used for training the model remains the same including callbacks, and model compilation.
+
 ```{r cnn-train}
 
-history_hot_dog_aug <- fit_generator(
-    hd_cnn,
-    train_generator,
-    epochs = 50,
-    validation_data = valid_generator,
-    validation_steps=length(valid_generator$labels)/batch_size,
-    steps_per_epoch=length(train_generator$labels)/batch_size
+hd_cnn_aug <- hd_cnn
+
+compile(
+    hd_cnn_aug,
+    loss = 'binomial_crossentropy',
+    optimizer = optimizer_adam(),
+    metrics = c('accuracy')
 )
 
+#define early stopping callback
+early_stop <- keras::callback_early_stopping(monitor = 'val_loss', patience=5)
+
+#define checkpoint callback
+checkpoint <- keras::callback_model_checkpoint(filepath = 'models/best_hd_cnn_aug.h5', monitor = 'val_loss', save_best_only = TRUE)
+
+```
+
+```{r}
+
+history_hot_dog_aug <- fit_generator(
+    hd_cnn_aug,
+    train_generator,
+    epochs = 30,
+    validation_data = valid_generator,
+    validation_steps=length(valid_generator$labels)/batch_size,
+    steps_per_epoch=length(train_generator$labels)/batch_size,
+    callback = c(early_stop, checkpoint)
+)
+
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+png('history_hot_dog_aug.png', width = 800, height = 600)
 plot(history_hot_dog_aug)
+invisible(dev.off())
 
-keras::save_model_hdf5(hd_cnn, 'hd_cnn_aug.h5')
+best_hd_cnn_aug <- keras::load_model_hdf5('models/best_hd_cnn_aug.h5')
 
-evaluate_generator(hd_cnn, valid_generator, steps = length(valid_generator$labels))
+knitr::include_graphics('history_hot_dog_aug.png')
+
+evaluate_generator(best_hd_cnn_aug, valid_generator, steps = length(valid_generator$labels))
 
 ```
 
@@ -701,6 +857,7 @@ evaluate_generator(hd_cnn, valid_generator, steps = length(valid_generator$label
 
 ```{r use-imagenet-model}
 
+#donwload densenet model
 conv_base <- application_densenet121(weights='imagenet', include_top= FALSE, input_shape=c(128,128,3))
 
 ```
@@ -720,12 +877,17 @@ compile(
     metrics = c("accuracy")
 )
 
-summary(transfer_model)
+#define early stopping callback
+early_stop <- keras::callback_early_stopping(monitor = 'val_loss', patience=5)
+
+#define checkpoint callback
+checkpoint <- keras::callback_model_checkpoint(filepath = 'models/best_transfer.h5', monitor = 'val_loss', save_best_only = TRUE)
 
 ```
 
 ```{r freeze-params}
 
+#freeze weights of the transfer model (why would we need to re-estimate again)
 freeze_weights(conv_base, to = "conv5_block16_2_conv")
 summary(transfer_model)
 
@@ -736,15 +898,21 @@ summary(transfer_model)
 history_hot_dog_trans <- fit_generator(
     transfer_model,
     train_generator,
-    epochs = 50,
+    epochs = 30,
     validation_data = valid_generator,
     validation_steps=length(valid_generator$labels)/batch_size,
-    steps_per_epoch=length(train_generator$labels)/batch_size
+    steps_per_epoch=length(train_generator$labels)/batch_size,
+    callbacks = c(early_stop, checkpoint)
 )
 
+#run these in the console because dev.off does not properly work with markdown's inline plotting
+png('history_hot_dog_trans.png', width = 800, height = 600)
 plot(history_hot_dog_trans)
+invisible(dev.off())
 
-keras::save_model_hdf5(transfer_model, 'transfer_model.h5')
+best_transfer <- keras::load_model_hdf5('models/best_transfer.h5')
+
+knitr::include_graphics('history_hot_dog_trans.png')
 
 evaluate_generator(transfer_model, valid_generator, steps = length(valid_generator$labels))
 
