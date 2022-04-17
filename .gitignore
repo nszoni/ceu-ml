@@ -1,3 +1,8 @@
 data/fashion/
 data/digits/
 homeworks/.Rhistory
+homeworks/models
+homeworks/submissions
+homeworks/automl*
+homeworks/*cache
+homeworks/*files
